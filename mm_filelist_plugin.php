@@ -11,9 +11,18 @@ Author: Adam Bissonnette, Wilhelm Svenselius
 
 class MM_FileList
 {
+    private $dateformat = "Y-m-d H:i:s";
+    private $orderby = "name";
+    private $order = "asc";
+    private $prettyname = false;
+    private $regexstrip = "";
+    private $regexreplace = " ";
+    private $regexfilter = "";
+    private $regexfilterinclusive = false;
     private $removeextension = false;
     private $removesize = false;
-    private $subfolders = false;
+    private $subdirs = false;
+    private $typestolist = array();
 
     function __construct($config = [])
     {
@@ -44,75 +53,50 @@ class MM_FileList
                     "headings" => "",
                     "removesize" => false,
                     "removeextension" => false,
-                    "subfolders" => false,
+                    "subdirs" => false,
                     "usecwd" => false,
                 ],
                 $atts
             )
         );
 
-        $this->removesize = $removesize;
+        $this->dateformat = $dateformat;
+        $this->orderby = $orderby;
+        $this->order = $order;
+        $this->prettyname = $prettyname;
+        $this->regexstrip = $regexstrip;
+        $this->regexreplace = $regexreplace;
+        $this->regexfilter = $regexfilter;
+        $this->regexfilterinclusive = $regexfilterinclusive;
         $this->removeextension = $removeextension;
-        $this->subfolders = $subfolders;
+        $this->removesize = $removesize;
+        $this->subdirs = $subdirs;
+        $this->typestolist = array_filter(explode(",", $types));
 
         $folder = $this->_trim_slashes($folder);
 
         $baseDir = wp_upload_dir();
-        $dir = $baseDir["path"] . "/" . $folder;
-        $outputDir = $baseDir["url"] . "/" . $folder;
+        $sourceDir = $baseDir["path"] . "/" . $folder;
+        $targetUrl = $baseDir["url"] . "/" . $folder;
 
         if ($usecwd) {
-            $dir = getcwd() . "/" . $folder;
-            $outputDir = $folder;
+            $sourceDir = getcwd() . "/" . $folder;
+            $targetUrl = $folder;
         }
 
-        $typesToList = array_filter(explode(",", $types));
         $output = "";
-        $files = is_dir($dir);
+        $files = is_dir($sourceDir);
 
         if (!$files) {
             $output .= sprintf(
                 '<div class="mmm-warning">The folder "%s" was not found at: "%s".',
-                $dir,
-                $outputDir
+                $sourceDir,
+                $targetUrl
             );
         } else {
-            $files = scandir($dir);
+            $files = $this->_scan_directory($sourceDir);
 
-            if ($orderby == "date") {
-                $files = array_reverse(
-                    $this->_sort_files_by_date($dir . "/", $files)
-                );
-            }
-
-            if ($order == "desc") {
-                $files = array_reverse($files);
-            }
-
-            if ($regexfilter != "") {
-                $filteredfiles = [];
-
-                foreach ($files as $file) {
-                    $filterMatch = preg_match($regexfilter, $file) == 1;
-                    if ($filterMatch && $regexfilterinclusive != false) {
-                        array_push($filteredfiles, $file);
-                    } elseif (!$filterMatch && $regexfilterinclusive == false) {
-                        array_push($filteredfiles, $file);
-                    }
-                }
-                $files = $filteredfiles;
-            }
-
-            $list = $this->_get_list_of_files(
-                $files,
-                $dir,
-                $outputDir,
-                $prettyname,
-                $regexstrip,
-                $regexreplace,
-                $dateformat,
-                $typesToList
-            );
+            $list = $this->_get_list_of_files($files, $sourceDir, $targetUrl);
 
             if (is_numeric($limit)) {
                 if ($limit > 0) {
@@ -128,7 +112,7 @@ class MM_FileList
                 $output .= sprintf(
                     '<div class="mmm-warning">No files (of extension(s): "%s") found in: %s </div>',
                     $types,
-                    $outputDir
+                    $targetUrl
                 );
             } else {
                 $formatAtts = ["class" => $class, "target" => $target];
@@ -179,7 +163,7 @@ class MM_FileList
                         );
                         break;
                     case "table":
-                        $output = $this->_MakeTabularLIst(
+                        $output = $this->_make_tabular_list(
                             $list,
                             $content,
                             $formatAtts,
@@ -203,21 +187,53 @@ class MM_FileList
         return $output;
     }
 
-    function _get_list_of_files($files, $dir, $outputDir, $prettyname, $regexstrip, $regexreplace, $dateformat, $typesToList)
+    function _scan_directory($sourceDir) 
+    {
+        $files = scandir($sourceDir);
+
+        if ($this->orderby == "date") {
+            $files = array_reverse(
+                $this->_sort_files_by_date($sourceDir . "/", $files)
+            );
+        }
+
+        if ($this->order == "desc") {
+            $files = array_reverse($files);
+        }
+
+        if ($this->regexfilter != "") {
+            $filteredfiles = [];
+
+            foreach ($files as $file) {
+                $filterMatch = preg_match($this->regexfilter, $file) == 1;
+                if ($filterMatch && $this->regexfilterinclusive != false) {
+                    array_push($filteredfiles, $file);
+                } elseif (!$filterMatch && $this->regexfilterinclusive == false) {
+                    array_push($filteredfiles, $file);
+                }
+            }
+            $files = $filteredfiles;
+        }
+
+        return $files;
+    }
+
+    function _get_list_of_files($files, $sourceDir, $targetUrl, $subDir = "")
     {
         $list = [];
 
         foreach ($files as $file) {
             $path_parts = pathinfo($file);
             
-            // excludes folders
             if (isset($path_parts["extension"])) {
+                // File is a file, not a directory - evaluate and add to list
+
                 $extension = $path_parts["extension"];
 
                 if ($file != "." && $file != "..") {
-                    if (!is_dir($dir . "/" . $file)) {
+                    if (!is_dir($sourceDir . "/" . $file)) {
                         $filename = $file;
-                        if ($prettyname != false) {
+                        if ($this->prettyname != false) {
                             $filename = $this->_regex_remove(
                                 $file,
                                 '/-|_| |\.[a-zA-Z0-9]*$/'
@@ -229,31 +245,32 @@ class MM_FileList
                             );
                         }
 
-                        if ($regexstrip != "") {
+                        if ($this->regexstrip != "") {
                             $filename = $this->_regex_remove(
                                 $filename,
-                                $regexstrip,
-                                $regexreplace
+                                $this->regexstrip,
+                                $this->regexreplace
                             );
                         }
 
                         $modifiedDate = date(
-                            $dateformat,
-                            filemtime($dir . "/" . $file)
+                            $this->dateformat,
+                            filemtime($sourceDir . "/" . $file)
                         );
 
                         $file = [
                             "name" => $filename,
                             "ext" => $extension,
                             "date" => $modifiedDate,
-                            "url" => $outputDir . "/" . $file,
+                            "url" => $targetUrl . "/" . $file,
                             "size" => $this->_format_filesize(
-                                filesize($dir . "/" . $file)
+                                filesize($sourceDir . "/" . $file)
                             ),
+                            "subdir" => $subDir
                         ];
 
-                        if (count($typesToList) > 0) {
-                            if (in_array($extension, $typesToList)) {
+                        if (count($this->typestolist) > 0) {
+                            if (in_array($extension, $this->typestolist)) {
                                 array_push($list, $file);
                             }
                         } else {
@@ -261,9 +278,24 @@ class MM_FileList
                         }
                     }
                 }
+            } else if($this->subdirs && $file != "." && $file != ".." && $subDir == "") {
+                // File is a directory, recurse (only one level)
+
+                $subSourceDir = $sourceDir . "/" . $file;
+                $subTargetUrl = $targetUrl . "/" . $file;
+
+                $subDirFiles = $this->_scan_directory($subSourceDir);
+
+                $subDirList = $this->_get_list_of_files(
+                    $subDirFiles,
+                    $subSourceDir,
+                    $subTargetUrl,
+                    $file
+                );
+
+                $list = array_merge($list, $subDirList);
             }
         }
-
 
         return $list;
     }
@@ -451,16 +483,16 @@ class MM_FileList
         return $result;
     }
 
-    function _sort_files_by_date($dir, $files)
+    function _sort_files_by_date($sourceDir, $files)
     {
         $arr = [];
         $i = 0;
         foreach ($files as $filename) {
             if ($filename != "." && $filename != "..") {
-                if (filemtime($dir . $filename) === false) {
+                if (filemtime($sourceDir . $filename) === false) {
                     return false;
                 }
-                $dat = date("YmdHis", filemtime($dir . $filename));
+                $dat = date("YmdHis", filemtime($sourceDir . $filename));
                 $arr[$dat . "," . $i++] = $filename;
             }
         }
