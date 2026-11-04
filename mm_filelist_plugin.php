@@ -1,4 +1,7 @@
 <?php
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
 /*
 Plugin Name: Mmm Simple File List (modified)
 Description: Plugin to list files in a given directory.
@@ -10,6 +13,7 @@ class MM_FileList
 {
     private $removeextension = false;
     private $removesize = false;
+    private $subfolders = false;
 
     function __construct($config = [])
     {
@@ -28,7 +32,7 @@ class MM_FileList
                     "types" => "",
                     "class" => "",
                     "limit" => "-1",
-                    "orderby" => "name", //name or date
+                    "orderby" => "name", // name or date
                     "order" => "asc",
                     "target" => "",
                     "prettyname" => false,
@@ -40,6 +44,7 @@ class MM_FileList
                     "headings" => "",
                     "removesize" => false,
                     "removeextension" => false,
+                    "subfolders" => false,
                     "usecwd" => false,
                 ],
                 $atts
@@ -48,6 +53,7 @@ class MM_FileList
 
         $this->removesize = $removesize;
         $this->removeextension = $removeextension;
+        $this->subfolders = $subfolders;
 
         $folder = $this->_trim_slashes($folder);
 
@@ -61,9 +67,7 @@ class MM_FileList
         }
 
         $typesToList = array_filter(explode(",", $types));
-
         $output = "";
-
         $files = is_dir($dir);
 
         if (!$files) {
@@ -74,8 +78,6 @@ class MM_FileList
             );
         } else {
             $files = scandir($dir);
-
-            $list = [];
 
             if ($orderby == "date") {
                 $files = array_reverse(
@@ -101,62 +103,16 @@ class MM_FileList
                 $files = $filteredfiles;
             }
 
-            foreach ($files as $file) {
-                $path_parts = pathinfo($file);
-                
-                // excludes folders
-                if (isset($path_parts["extension"])) {
-                    $extension = $path_parts["extension"];
-
-                    if ($file != "." && $file != "..") {
-                        if (!is_dir($dir . "/" . $file)) {
-                            $filename = $file;
-                            if ($prettyname != false) {
-                                $filename = $this->_regex_remove(
-                                    $file,
-                                    '/-|_| |\.[a-zA-Z0-9]*$/'
-                                );
-                            } elseif ($this->removeextension != false) {
-                                $filename = $this->_regex_remove(
-                                    $file,
-                                    '/\.[a-zA-Z0-9]*$/'
-                                );
-                            }
-
-                            if ($regexstrip != "") {
-                                $filename = $this->_regex_remove(
-                                    $filename,
-                                    $regexstrip,
-                                    $regexreplace
-                                );
-                            }
-
-                            $modifiedDate = date(
-                                $dateformat,
-                                filemtime($dir . "/" . $file)
-                            );
-
-                            $file = [
-                                "name" => $filename,
-                                "ext" => $extension,
-                                "date" => $modifiedDate,
-                                "url" => $outputDir . "/" . $file,
-                                "size" => $this->_format_filesize(
-                                    filesize($dir . "/" . $file)
-                                ),
-                            ];
-
-                            if (count($typesToList) > 0) {
-                                if (in_array($extension, $typesToList)) {
-                                    array_push($list, $file);
-                                }
-                            } else {
-                                array_push($list, $file);
-                            }
-                        }
-                    }
-                }
-            }
+            $list = $this->_get_list_of_files(
+                $files,
+                $dir,
+                $outputDir,
+                $prettyname,
+                $regexstrip,
+                $regexreplace,
+                $dateformat,
+                $typesToList
+            );
 
             if (is_numeric($limit)) {
                 if ($limit > 0) {
@@ -245,6 +201,71 @@ class MM_FileList
         }
 
         return $output;
+    }
+
+    function _get_list_of_files($files, $dir, $outputDir, $prettyname, $regexstrip, $regexreplace, $dateformat, $typesToList)
+    {
+        $list = [];
+
+        foreach ($files as $file) {
+            $path_parts = pathinfo($file);
+            
+            // excludes folders
+            if (isset($path_parts["extension"])) {
+                $extension = $path_parts["extension"];
+
+                if ($file != "." && $file != "..") {
+                    if (!is_dir($dir . "/" . $file)) {
+                        $filename = $file;
+                        if ($prettyname != false) {
+                            $filename = $this->_regex_remove(
+                                $file,
+                                '/-|_| |\.[a-zA-Z0-9]*$/'
+                            );
+                        } elseif ($this->removeextension != false) {
+                            $filename = $this->_regex_remove(
+                                $file,
+                                '/\.[a-zA-Z0-9]*$/'
+                            );
+                        }
+
+                        if ($regexstrip != "") {
+                            $filename = $this->_regex_remove(
+                                $filename,
+                                $regexstrip,
+                                $regexreplace
+                            );
+                        }
+
+                        $modifiedDate = date(
+                            $dateformat,
+                            filemtime($dir . "/" . $file)
+                        );
+
+                        $file = [
+                            "name" => $filename,
+                            "ext" => $extension,
+                            "date" => $modifiedDate,
+                            "url" => $outputDir . "/" . $file,
+                            "size" => $this->_format_filesize(
+                                filesize($dir . "/" . $file)
+                            ),
+                        ];
+
+                        if (count($typesToList) > 0) {
+                            if (in_array($extension, $typesToList)) {
+                                array_push($list, $file);
+                            }
+                        } else {
+                            array_push($list, $file);
+                        }
+                    }
+                }
+            }
+        }
+
+
+        return $list;
     }
 
     function _add_file_atts_to_template($template, $fileAtts)
